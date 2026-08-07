@@ -1,0 +1,463 @@
+<h2>Radio Operator — bug fixed, hypothesis readout removed (v12)</h2>
+<p class="subtitle">Fixed a bug that was zeroing out every direction: the post-segment's own first cell IS the exit point (not a new step), so comparing it against itself was a false collision every time — that's why N/E looked wrongly blocked. Also removed the "N, 2 cells" text readout entirely; spelling out the hypothesis in words was doing the deduction for you instead of just showing what's on the map.</p>
+
+<div style="display:flex;gap:20px;font-family:monospace;background:#05080d;padding:16px;border-radius:8px;border:1px solid #1a3a2a;">
+  <div>
+    <div style="color:#facc15;font-size:20px;letter-spacing:6px;background:#0a1510;border:1px solid #1a3a2a;border-radius:6px;padding:10px;margin-bottom:10px;">
+      N&nbsp; N&nbsp; <span style="color:#818cf8;background:#1a1a2a;padding:1px 6px;border-radius:3px;">🔇 SILENCE</span>&nbsp; E&nbsp; E&nbsp; S&nbsp; <span style="color:#4ade80;background:#12200f;padding:1px 5px;border-radius:3px;">S◂new</span>
+    </div>
+    <div id="ro-grid-wrap" style="position:relative;"></div>
+    <div style="margin-top:8px;font-size:11px;color:#64748b;">
+      Drag the yellow path to move it all. Drag the purple diamond to set the silence direction/distance. Right-click a cell to eliminate it. Click a row/column label to highlight it.
+    </div>
+  </div>
+
+  <div style="width:230px;color:#8fffb0;">
+    <div style="font-weight:bold;font-size:13px;margin-bottom:8px;">INTEL LOG</div>
+    <div style="font-size:11px;line-height:1.9;">
+      <div class="ro-log-entry" data-event="silence" style="cursor:pointer;padding:4px 6px;border-radius:4px;color:#a5b4c3;">🔇 Silence used <span style="color:#475569">(after move 2)</span></div>
+      <div class="ro-log-entry" data-event="drone" style="cursor:pointer;padding:4px 6px;border-radius:4px;color:#a5b4c3;">📡 Drone: sector 7 <span style="color:#475569">(post-silence move 2)</span></div>
+    </div>
+    <div style="font-size:10px;color:#64748b;margin-top:4px;">click an entry to find it on the map</div>
+
+    <div style="margin-top:16px;font-weight:bold;font-size:13px;">PATH HEAD</div>
+    <div id="ro-head-coord" style="font-size:20px;color:#eab308;margin-top:2px;">—</div>
+
+    <div style="margin-top:20px;display:flex;flex-direction:column;gap:6px;">
+      <button onclick="roClearElim()" style="background:#1a1a2a;border:1px solid #334155;color:#8fffb0;padding:8px;border-radius:4px;cursor:pointer;font-family:monospace;font-size:11px;">Clear eliminated cells</button>
+      <button onclick="roPinPath()" style="background:#123322;border:1px solid #4ade80;color:#4ade80;padding:8px;border-radius:4px;cursor:pointer;font-family:monospace;font-size:11px;">📌 Pin this as a candidate</button>
+    </div>
+    <div id="ro-pinned-list" style="margin-top:10px;font-size:11px;color:#94a3b8;"></div>
+  </div>
+</div>
+
+<style>
+@keyframes ro-collide-pulse {
+  0%, 100% { background:#7f1d1d; box-shadow: 0 0 0px #ef4444; }
+  50% { background:#ef4444; box-shadow: 0 0 10px 2px #ef4444; }
+}
+.ro-collide { animation: ro-collide-pulse 0.7s ease-in-out infinite; }
+
+@keyframes ro-ring-pulse {
+  0% { r: 11; opacity: 1; }
+  70% { r: 20; opacity: 0; }
+  100% { r: 11; opacity: 1; }
+}
+.ro-pulse-ring { animation: ro-ring-pulse 0.5s ease-out 3; }
+</style>
+
+<script>
+(function() {
+  const SIZE = 15;
+  const CELL = 20;
+  const LABEL = 22;
+  const islands = new Set(["3,3","3,4","10,10","11,10","7,7","2,9","2,10","6,3"]);
+  const cols = "ABCDEFGHIJKLMNO".split("");
+  const wrap = document.getElementById("ro-grid-wrap");
+  const deltas = { N: [0,-1], S: [0,1], E: [1,0], W: [-1,0] };
+  const DIRS = ["N", "E", "S", "W"];
+  const MAX_SILENCE = 4;
+
+  const preMoves = ["N", "N"];
+  const postMoves = ["E", "E", "S", "S"];
+
+  function buildRel(moveList) {
+    const rel = [[0, 0]];
+    let cur = [0, 0];
+    moveList.forEach(m => {
+      cur = [cur[0] + deltas[m][0], cur[1] + deltas[m][1]];
+      rel.push([...cur]);
+    });
+    return rel;
+  }
+  const preRel = buildRel(preMoves);   // relative to tail
+  const postRel = buildRel(postMoves); // relative to its own start (silence exit)
+
+  const gridEl = document.createElement("div");
+  gridEl.style.position = "relative";
+  gridEl.style.display = "inline-block";
+  gridEl.style.border = "2px solid #1a5c3a";
+  gridEl.style.borderRadius = "4px";
+  gridEl.style.background = "#05100a";
+  gridEl.style.userSelect = "none";
+  gridEl.style.width = (LABEL + SIZE * CELL) + "px";
+  gridEl.style.height = (18 + SIZE * CELL) + "px";
+
+  let highlightRow = null, highlightCol = null;
+
+  const colHeaderEls = [];
+  cols.forEach((c, ci) => {
+    const el = document.createElement("div");
+    el.textContent = c;
+    el.style.position = "absolute";
+    el.style.left = (LABEL + ci * CELL) + "px";
+    el.style.top = "0px";
+    el.style.width = CELL + "px";
+    el.style.height = "16px";
+    el.style.fontSize = "9px";
+    el.style.color = "#4ade80";
+    el.style.textAlign = "center";
+    el.style.cursor = "pointer";
+    el.style.borderRadius = "3px";
+    el.addEventListener("click", () => { highlightCol = highlightCol === ci ? null : ci; render(); });
+    gridEl.appendChild(el);
+    colHeaderEls.push(el);
+  });
+  const rowHeaderEls = [];
+  for (let r = 0; r < SIZE; r++) {
+    const el = document.createElement("div");
+    el.textContent = r + 1;
+    el.style.position = "absolute";
+    el.style.left = "0px";
+    el.style.top = (18 + r * CELL) + "px";
+    el.style.width = LABEL + "px";
+    el.style.height = CELL + "px";
+    el.style.lineHeight = CELL + "px";
+    el.style.fontSize = "9px";
+    el.style.color = "#4ade80";
+    el.style.cursor = "pointer";
+    el.style.borderRadius = "3px";
+    el.addEventListener("click", () => { highlightRow = highlightRow === r ? null : r; render(); });
+    gridEl.appendChild(el);
+    rowHeaderEls.push(el);
+  }
+
+  const elimState = {};
+  const cellEls = {};
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      const key = r + "," + c;
+      const cell = document.createElement("div");
+      cell.style.position = "absolute";
+      cell.style.left = (LABEL + c * CELL) + "px";
+      cell.style.top = (18 + r * CELL) + "px";
+      cell.style.width = CELL + "px";
+      cell.style.height = CELL + "px";
+      cell.style.boxSizing = "border-box";
+      cell.style.borderRight = (c % 5 === 4 && c !== SIZE - 1) ? "2px solid #1a5c3a" : "1px solid #10241a";
+      cell.style.borderBottom = (r % 5 === 4 && r !== SIZE - 1) ? "2px solid #1a5c3a" : "1px solid #10241a";
+      cell.style.display = "flex";
+      cell.style.alignItems = "center";
+      cell.style.justifyContent = "center";
+      cell.style.fontSize = "11px";
+      if (islands.has(key)) {
+        cell.textContent = "▪";
+        cell.style.color = "#94a3b8";
+        cell.style.background = "#0e1620";
+      } else {
+        cell.addEventListener("contextmenu", (e) => { e.preventDefault(); elimState[key] = !elimState[key]; render(); });
+      }
+      gridEl.appendChild(cell);
+      cellEls[key] = cell;
+    }
+  }
+  wrap.appendChild(gridEl);
+
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("width", LABEL + SIZE * CELL);
+  svg.setAttribute("height", 18 + SIZE * CELL);
+  svg.style.position = "absolute";
+  svg.style.left = "0px";
+  svg.style.top = "0px";
+  svg.style.pointerEvents = "none";
+  gridEl.appendChild(svg);
+
+  for (let sr = 0; sr < 3; sr++) {
+    for (let sc = 0; sc < 3; sc++) {
+      const num = sr * 3 + sc + 1;
+      const t = document.createElementNS(svgNS, "text");
+      t.setAttribute("x", LABEL + (sc * 5 + 2.5) * CELL);
+      t.setAttribute("y", 18 + (sr * 5 + 2.5) * CELL);
+      t.setAttribute("text-anchor", "middle");
+      t.setAttribute("dominant-baseline", "central");
+      t.setAttribute("font-size", "44");
+      t.setAttribute("font-weight", "bold");
+      t.setAttribute("fill", "#123322");
+      t.style.pointerEvents = "none";
+      t.textContent = num;
+      svg.appendChild(t);
+    }
+  }
+
+  const PATH_COLOR = "#eab308";
+  const SILENCE_COLOR = "#818cf8";
+
+  function toPx([r, c]) { return [LABEL + c * CELL + CELL / 2, 18 + r * CELL + CELL / 2]; }
+
+  // pre-silence segment (draggable as a whole)
+  const preHit = document.createElementNS(svgNS, "polyline");
+  preHit.setAttribute("fill", "none"); preHit.setAttribute("stroke", "transparent"); preHit.setAttribute("stroke-width", "14");
+  preHit.style.pointerEvents = "visiblePainted"; preHit.style.cursor = "grab";
+  svg.appendChild(preHit);
+  const preLine = document.createElementNS(svgNS, "polyline");
+  preLine.setAttribute("fill", "none"); preLine.setAttribute("stroke", PATH_COLOR); preLine.setAttribute("stroke-width", "3");
+  preLine.setAttribute("stroke-linejoin", "round"); preLine.setAttribute("stroke-linecap", "round");
+  preLine.style.pointerEvents = "none";
+  svg.appendChild(preLine);
+  const preDots = preRel.map((_, i) => {
+    const c = document.createElementNS(svgNS, "circle");
+    c.setAttribute("r", 5); c.setAttribute("fill", PATH_COLOR);
+    c.style.pointerEvents = "visiblePainted"; c.style.cursor = "grab";
+    svg.appendChild(c);
+    return c;
+  });
+
+  // 4 faint always-on compass guides from the silence point
+  const compassLines = DIRS.map(dir => {
+    const line = document.createElementNS(svgNS, "line");
+    line.setAttribute("stroke", "#334155");
+    line.setAttribute("stroke-width", "2");
+    line.setAttribute("stroke-dasharray", "3,3");
+    line.style.pointerEvents = "none";
+    svg.appendChild(line);
+    return line;
+  });
+
+  // the dashed "actually walked but unknown" offset segment
+  const offsetLine = document.createElementNS(svgNS, "polyline");
+  offsetLine.setAttribute("fill", "none"); offsetLine.setAttribute("stroke", SILENCE_COLOR);
+  offsetLine.setAttribute("stroke-width", "3"); offsetLine.setAttribute("stroke-dasharray", "5,4");
+  offsetLine.setAttribute("stroke-linecap", "round");
+  offsetLine.style.pointerEvents = "none";
+  svg.appendChild(offsetLine);
+
+  // draggable diamond handle at the silence exit point
+  const handleHit = document.createElementNS(svgNS, "circle");
+  handleHit.setAttribute("r", 12); handleHit.setAttribute("fill", "transparent");
+  handleHit.style.pointerEvents = "visiblePainted"; handleHit.style.cursor = "grab";
+  svg.appendChild(handleHit);
+  const handle = document.createElementNS(svgNS, "rect");
+  handle.setAttribute("width", 12); handle.setAttribute("height", 12);
+  handle.setAttribute("fill", SILENCE_COLOR); handle.setAttribute("stroke", "white"); handle.setAttribute("stroke-width", "1");
+  handle.style.pointerEvents = "none";
+  svg.appendChild(handle);
+
+  // post-silence segment (known shape, follows the handle)
+  const postLine = document.createElementNS(svgNS, "polyline");
+  postLine.setAttribute("fill", "none"); postLine.setAttribute("stroke", PATH_COLOR); postLine.setAttribute("stroke-width", "3");
+  postLine.setAttribute("stroke-linejoin", "round"); postLine.setAttribute("stroke-linecap", "round");
+  postLine.style.pointerEvents = "none";
+  svg.appendChild(postLine);
+  const postDots = postRel.map((_, i) => {
+    const c = document.createElementNS(svgNS, "circle");
+    c.setAttribute("r", i === postRel.length - 1 ? 7 : 5); c.setAttribute("fill", PATH_COLOR);
+    c.style.pointerEvents = "none";
+    svg.appendChild(c);
+    return c;
+  });
+
+  const intelEvents = [
+    { key: "silence", where: () => jointAbs(), icon: "🔇", color: SILENCE_COLOR },
+    { key: "drone", where: () => postAbsCells()[2], icon: "📡", color: "#60a5fa" },
+  ];
+  const badgeEls = {};
+  intelEvents.forEach(ev => {
+    const ring = document.createElementNS(svgNS, "circle");
+    ring.setAttribute("r", 11); ring.setAttribute("fill", "none"); ring.setAttribute("stroke", ev.color); ring.setAttribute("stroke-width", "2");
+    ring.style.pointerEvents = "none";
+    svg.appendChild(ring);
+    const label = document.createElementNS(svgNS, "text");
+    label.setAttribute("text-anchor", "middle"); label.setAttribute("font-size", "12"); label.textContent = ev.icon;
+    label.style.pointerEvents = "none";
+    svg.appendChild(label);
+    badgeEls[ev.key] = { ring, label };
+  });
+
+  document.querySelectorAll(".ro-log-entry").forEach(el => {
+    el.addEventListener("click", () => {
+      const { ring } = badgeEls[el.dataset.event];
+      ring.classList.add("ro-pulse-ring");
+      setTimeout(() => ring.classList.remove("ro-pulse-ring"), 1500);
+      document.querySelectorAll(".ro-log-entry").forEach(e => e.style.background = "");
+      el.style.background = "#12200f";
+    });
+  });
+
+  let anchor = { r: 6, c: 6 };
+  let offsetDir = "N", offsetSteps = 2;
+
+  function preAbsCells() { return preRel.map(([dc, dr]) => [anchor.r + dr, anchor.c + dc]); }
+  function jointAbs() { return preAbsCells()[preAbsCells().length - 1]; }
+  function offsetVector() { const [dx, dy] = deltas[offsetDir]; return [dx * offsetSteps, dy * offsetSteps]; }
+  function silenceExitAbs() {
+    const [jr, jc] = jointAbs(); const [dvc, dvr] = offsetVector();
+    return [jr + dvr, jc + dvc];
+  }
+  function isOnGridAndOpen([r, c]) {
+    return r >= 0 && r < SIZE && c >= 0 && c < SIZE && !islands.has(r + "," + c);
+  }
+  const cellKey = ([r, c]) => r + "," + c;
+
+  // How far a real sub could actually travel in `dir` from `from` before
+  // hitting an island/grid edge, re-crossing the known pre-silence trail, or
+  // landing at an exit point where the known post-silence path would itself
+  // step back onto trail — this bounds where the silence handle/guides can
+  // ever reach. Stops at the first violation; doesn't resume past it.
+  function maxValidSteps(from, dir) {
+    const [dx, dy] = deltas[dir];
+    const preCells = preAbsCells();
+    const preSet = new Set(preCells.map(cellKey));
+    let steps = 0;
+    for (let s = 1; s <= MAX_SILENCE; s++) {
+      const cell = [from[0] + dy * s, from[1] + dx * s];
+      if (!isOnGridAndOpen(cell)) break;
+      if (preSet.has(cellKey(cell))) break; // silence step would re-cross the pre-silence trail
+
+      // Check the resulting post-silence segment, anchored at this candidate
+      // exit, against everything walked so far (pre-silence trail + the
+      // silence steps up to and including this one).
+      const walkedSoFar = new Set(preSet);
+      for (let k = 1; k <= s; k++) walkedSoFar.add(cellKey([from[0] + dy * k, from[1] + dx * k]));
+      const postAtThisExit = postRel.map(([pdc, pdr]) => [cell[0] + pdr, cell[1] + pdc]);
+      // postAtThisExit[0] IS `cell` (the exit point restated) — that's not a
+      // re-crossing, skip it and only check the actual subsequent steps.
+      const postCollides = postAtThisExit.slice(1).some(c => walkedSoFar.has(cellKey(c)));
+      if (postCollides) break;
+
+      steps = s;
+    }
+    return steps;
+  }
+
+  function offsetPathCells() {
+    // intermediate + final cells actually stepped through during silence
+    const [jr, jc] = jointAbs(); const [dx, dy] = deltas[offsetDir];
+    const out = [];
+    for (let s = 1; s <= offsetSteps; s++) out.push([jr + dy * s, jc + dx * s]);
+    return out;
+  }
+  function postAbsCells() {
+    const [er, ec] = silenceExitAbs();
+    return postRel.map(([dc, dr]) => [er + dr, ec + dc]);
+  }
+
+  function render() {
+    for (let r = 0; r < SIZE; r++) {
+      for (let c = 0; c < SIZE; c++) {
+        const key = r + "," + c;
+        const inHighlight = (highlightRow !== null && r === highlightRow) || (highlightCol !== null && c === highlightCol);
+        if (islands.has(key)) { cellEls[key].style.background = inHighlight ? "#1c1408" : "#0e1620"; continue; }
+        cellEls[key].style.background = elimState[key] ? "#150a0a" : (inHighlight ? "#1c2408" : "");
+        cellEls[key].textContent = elimState[key] ? "✕" : "";
+        cellEls[key].style.color = elimState[key] ? "#7f1d1d" : "";
+      }
+    }
+    colHeaderEls.forEach((el, ci) => { el.style.background = ci === highlightCol ? "#eab308" : ""; el.style.color = ci === highlightCol ? "#05080d" : "#4ade80"; });
+    rowHeaderEls.forEach((el, ri) => { el.style.background = ri === highlightRow ? "#eab308" : ""; el.style.color = ri === highlightRow ? "#05080d" : "#4ade80"; });
+
+    const preCells = preAbsCells();
+    const prePts = preCells.map(c => toPx(c).join(",")).join(" ");
+    preHit.setAttribute("points", prePts);
+    preLine.setAttribute("points", prePts);
+    preCells.forEach((c, i) => { const [x, y] = toPx(c); preDots[i].setAttribute("cx", x); preDots[i].setAttribute("cy", y); });
+
+    const joint = jointAbs();
+    offsetSteps = clamp(offsetSteps, 0, maxValidSteps(joint, offsetDir)); // guard against a now-invalid hypothesis after a path drag
+    const [jx, jy] = toPx(joint);
+    compassLines.forEach((line, i) => {
+      const dir = DIRS[i];
+      const [dx, dy] = deltas[dir];
+      const validSteps = maxValidSteps(joint, dir);
+      if (validSteps === 0) { line.setAttribute("x1", jx); line.setAttribute("y1", jy); line.setAttribute("x2", jx); line.setAttribute("y2", jy); return; }
+      const end = toPx([joint[0] + dy * validSteps, joint[1] + dx * validSteps]);
+      line.setAttribute("x1", jx); line.setAttribute("y1", jy);
+      line.setAttribute("x2", end[0]); line.setAttribute("y2", end[1]);
+    });
+
+    const exit = silenceExitAbs();
+    const [ex, ey] = toPx(exit);
+    const offCells = [joint, ...offsetPathCells()];
+    offsetLine.setAttribute("points", offCells.map(c => toPx(c).join(",")).join(" "));
+    handleHit.setAttribute("cx", ex); handleHit.setAttribute("cy", ey);
+    handle.setAttribute("x", ex - 6); handle.setAttribute("y", ey - 6);
+
+    const postCells = postAbsCells();
+    const postPts = postCells.map(c => toPx(c).join(",")).join(" ");
+    postLine.setAttribute("points", postPts);
+    postCells.forEach((c, i) => { const [x, y] = toPx(c); postDots[i].setAttribute("cx", x); postDots[i].setAttribute("cy", y); });
+
+    intelEvents.forEach(ev => {
+      const [x, y] = toPx(ev.where());
+      const { ring, label } = badgeEls[ev.key];
+      ring.setAttribute("cx", x); ring.setAttribute("cy", y);
+      label.setAttribute("x", x); label.setAttribute("y", y - 14);
+    });
+
+    const allWalked = [...preCells, ...offsetPathCells(), ...postCells];
+    islands.forEach(key => {
+      const [r, c] = key.split(",").map(Number);
+      cellEls[key].classList.toggle("ro-collide", allWalked.some(([pr, pc]) => pr === r && pc === c));
+    });
+
+    const head = postCells[postCells.length - 1];
+    document.getElementById("ro-head-coord").textContent =
+      (head[0] >= 0 && head[0] < SIZE && head[1] >= 0 && head[1] < SIZE) ? (cols[head[1]] + "" + (head[0] + 1)) : "off grid";
+  }
+
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  // clamp anchor so the FULL shape (pre + current offset + post) stays on-grid
+  function clampAnchor(a) {
+    const testPre = preRel.map(([dc, dr]) => [a.r + dr, a.c + dc]);
+    const joint = testPre[testPre.length - 1];
+    const [dx, dy] = deltas[offsetDir];
+    const exit = [joint[0] + dy * offsetSteps, joint[1] + dx * offsetSteps];
+    const testPost = postRel.map(([dc, dr]) => [exit[0] + dr, exit[1] + dc]);
+    const allR = [...testPre, ...testPost].map(c => c[0]);
+    const allC = [...testPre, ...testPost].map(c => c[1]);
+    const minR = Math.min(...allR), maxR = Math.max(...allR);
+    const minC = Math.min(...allC), maxC = Math.max(...allC);
+    let { r, c } = a;
+    if (minR < 0) r += -minR; if (maxR > SIZE - 1) r -= (maxR - (SIZE - 1));
+    if (minC < 0) c += -minC; if (maxC > SIZE - 1) c -= (maxC - (SIZE - 1));
+    return { r, c };
+  }
+
+  let dragging = null; // "path" | "handle"
+  let dragStartMouse = null;
+  let dragStartAnchor = null;
+
+  function startPathDrag(e) { dragging = "path"; dragStartMouse = { x: e.clientX, y: e.clientY }; dragStartAnchor = { ...anchor }; e.preventDefault(); }
+  preHit.addEventListener("mousedown", startPathDrag);
+  preDots.forEach(d => d.addEventListener("mousedown", startPathDrag));
+
+  handleHit.addEventListener("mousedown", (e) => { dragging = "handle"; e.preventDefault(); });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    if (dragging === "path") {
+      const dx = e.clientX - dragStartMouse.x, dy = e.clientY - dragStartMouse.y;
+      anchor = clampAnchor({ r: dragStartAnchor.r + Math.round(dy / CELL), c: dragStartAnchor.c + Math.round(dx / CELL) });
+      render();
+    } else if (dragging === "handle") {
+      const rect = gridEl.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const targetCol = Math.round((mx - LABEL - CELL / 2) / CELL);
+      const targetRow = Math.round((my - 18 - CELL / 2) / CELL);
+      const joint = jointAbs();
+      const dCol = targetCol - joint[1], dRow = targetRow - joint[0];
+      if (Math.abs(dCol) < 0.5 && Math.abs(dRow) < 0.5) { offsetSteps = 0; render(); return; }
+      const chosenDir = Math.abs(dCol) >= Math.abs(dRow) ? (dCol > 0 ? "E" : "W") : (dRow > 0 ? "S" : "N");
+      const rawSteps = Math.abs(chosenDir === "E" || chosenDir === "W" ? dCol : dRow);
+      offsetDir = chosenDir;
+      offsetSteps = clamp(rawSteps, 0, maxValidSteps(joint, chosenDir));
+      anchor = clampAnchor(anchor); // in case the new offset would push post off-grid
+      render();
+    }
+  });
+  window.addEventListener("mouseup", () => { dragging = null; });
+
+  render();
+
+  let pinned = [];
+  window.roClearElim = function() { Object.keys(elimState).forEach(k => elimState[k] = false); render(); };
+  window.roPinPath = function() {
+    const head = postAbsCells()[postAbsCells().length - 1];
+    pinned.push(cols[head[1]] + "" + (head[0] + 1));
+    document.getElementById("ro-pinned-list").innerHTML = "Pinned: " + pinned.map(p => `<span style="color:#eab308">${p}</span>`).join(", ");
+  };
+})();
+</script>
+
+<p class="section" style="margin-top:16px;">Rough draft — try dragging the diamond around the compass guides, and separately dragging the whole path. Does snapping only to the 4 cardinal spokes feel natural, or is picking a direction vs. distance in one drag gesture confusing (would two separate controls — pick direction, then a distance slider — be clearer)?</p>
