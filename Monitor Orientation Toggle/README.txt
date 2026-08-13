@@ -16,6 +16,7 @@ One-time setup on her PC
 1. Download MultiMonitorTool (portable, no installer) from the official
    NirSoft page:
        https://www.nirsoft.net/utils/multi_monitor_tool.html
+	https://www.nirsoft.net/utils/multimonitortool.zip
    Get the .zip, extract "MultiMonitorTool.exe", and place it directly in
    this same folder, next to the .ps1 and .bat files.
 
@@ -24,7 +25,13 @@ One-time setup on her PC
    "Toggle-SecondMonitorOrientation.ps1" -> Run with PowerShell is NOT what
    you want for this step; instead open PowerShell in this folder and run:
 
-       .\Toggle-SecondMonitorOrientation.ps1 -ListMonitors
+       powershell -ExecutionPolicy Bypass -File ".\Toggle-SecondMonitorOrientation.ps1" -ListMonitors
+
+   (Most PCs block .ps1 files from running directly - the -ExecutionPolicy
+   Bypass part works around that for just this one command, without changing
+   any system-wide setting. If you see a red "running scripts is disabled on
+   this system" error, that's why - use the command above instead of
+   ".\Toggle-SecondMonitorOrientation.ps1 -ListMonitors".)
 
    A popup will list every detected display with its device name (e.g.
    "\\.\DISPLAY2"), current orientation in degrees, and whether it's the
@@ -60,12 +67,16 @@ That's it - the desktop shortcut is the button amima clicks.
 
 Dry run / checking without changing anything
 ----------------------------------------------
-   .\Toggle-SecondMonitorOrientation.ps1 -DryRun
+   powershell -ExecutionPolicy Bypass -File ".\Toggle-SecondMonitorOrientation.ps1" -DryRun
 Shows what it WOULD do without actually changing the orientation. Useful
 after editing the config values in step 3.
 
 Troubleshooting
 -----------------
+- "running scripts is disabled on this system" / "UnauthorizedAccess" - you
+  ran the .ps1 directly. Use the -ExecutionPolicy Bypass command shown in
+  step 2 instead (this is expected on most PCs and is not something to fix
+  system-wide).
 - "MultiMonitorTool.exe was not found" - it wasn't placed in this folder, or
   was renamed. Re-check step 1.
 - "The target monitor was not found" - the monitor is disconnected/asleep,
