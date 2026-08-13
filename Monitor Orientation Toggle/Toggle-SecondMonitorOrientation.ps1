@@ -58,6 +58,13 @@ function Get-FieldLike($Row, [string]$Pattern) {
     return $null
 }
 
+# MultiMonitorTool's /scomma export reports orientation as text ("Default",
+# "90 Degrees", "180 Degrees", "270 Degrees"), not a bare number.
+function ConvertTo-OrientationDegrees([string]$Text) {
+    if ($Text -match '(\d+)') { return [int]$Matches[1] }
+    return 0
+}
+
 function Get-MonitorRows {
     $csvPath = Join-Path $env:TEMP 'mmt-monitors.csv'
     & $ToolPath /scomma $csvPath | Out-Null
@@ -102,7 +109,7 @@ if (-not $target) {
     exit 1
 }
 
-$currentOrientation = [int](Get-FieldLike $target 'Orientation')
+$currentOrientation = ConvertTo-OrientationDegrees (Get-FieldLike $target 'Orientation')
 
 if ($currentOrientation -eq 0 -or $currentOrientation -eq 180) {
     $newOrientation = $PortraitOrientation
