@@ -40,7 +40,16 @@ overwrite the file):
 {
   "statusLine": {
     "type": "command",
-    "command": "bash ~/.claude/statusline-command.sh"
+    "command": "bash ~/.claude/statusline-command.sh",
+    "refreshInterval": 30
   }
 }
 ```
+
+`refreshInterval` (seconds) makes Claude Code re-run the command on a timer,
+in addition to its normal event-driven updates (new assistant message,
+`/compact`, permission-mode change, etc.). Without it, the countdown/pace
+fields here can go stale while you're idle, since nothing else triggers a
+re-render. 30s keeps them reasonably fresh without spawning a `bash`+`node`
+process every second for no real gain — the fields only display to the
+minute anyway.
