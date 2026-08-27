@@ -8,3 +8,5 @@ Personal Claude Code skills and misc files, for pulling onto a new machine.
 git clone https://github.com/conorlum/personal-claude-setup.git
 cp -r personal-claude-setup/skills/* ~/.claude/skills/
 ```
+
+See [statusline/README.md](statusline/README.md) to set up the custom status line.
