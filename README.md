@@ -14,8 +14,12 @@ See [statusline/README.md](statusline/README.md) to set up the custom status lin
 ## PowerShell profile
 
 `powershell-profile/Microsoft.PowerShell_profile.ps1` has custom functions
-(`code`, `matches`, `reps`, `stats`, `cswap`). To use on a new Windows machine:
+(`code`, `matches`, `reps`, `stats`, `cswap`, `buildcats`). To use on a new Windows machine:
 
 ```powershell
 copy powershell-profile\Microsoft.PowerShell_profile.ps1 $PROFILE
 ```
+
+`buildcats` additionally requires the `CatBnB` repo cloned under
+`~\Documents\GitHub`, `gh` authenticated, and Git Bash installed (it shells
+out to `CatBnB\scripts\ship_playtest_build.sh`).
