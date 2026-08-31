@@ -14,6 +14,15 @@ function stats {
     node "$HOME\Documents\GitHub\NoScrollJustDo\companion-app\stats.js"
 }
 
+# Builds the latest CatBnB Unity playtest player and force-pushes it to
+# the public conorlum/catbnb-playtest repo. The build/push logic lives in
+# bash (cygpath, powershell.exe calls) so this just shells out to it.
+function buildcats {
+    # Explicit path, not just "bash": on this machine PATH resolves the bare
+    # name to the WSL launcher stub in WindowsApps ahead of Git's bash.exe.
+    & "C:\Program Files\Git\bin\bash.exe" "$HOME\Documents\GitHub\CatBnB\scripts\ship_playtest_build.sh"
+}
+
 # Wraps cswap.exe to add a usage-pace delta to cswap list/cswap ls.
 # Pace = (% of the 5h/7d window elapsed) - (% quota used).
 # Positive = behind pace, room to use more. Negative = ahead of pace, slow down.
@@ -47,7 +56,7 @@ function cswap {
         $styleReset = "$esc[0m"
 
         foreach ($line in $textLines) {
-            if ($line -match '^\s(\d+):\s') {
+            if ($line -match '^\s+(\d+):\s') {
                 $currentAcc = $accountsByNum[[int]$Matches[1]]
                 if ($line -match '(active)') {
                     Write-Host "$activeStyle$line$styleReset"
@@ -58,8 +67,8 @@ function cswap {
             }
 
             $window = $null
-            if ($line -match '5h:\s([\d.]+)%') { $window = 'fiveHour' }
-            elseif ($line -match '7d:\s([\d.]+)%') { $window = 'sevenDay' }
+            if ($line -match '5h:\s+([\d.]+)%') { $window = 'fiveHour' }
+            elseif ($line -match '7d:\s+([\d.]+)%') { $window = 'sevenDay' }
 
             if ($window -and $currentAcc) {
                 $usage = $currentAcc.usage.$window
