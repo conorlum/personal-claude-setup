@@ -11,9 +11,11 @@ Custom Claude Code status line. Shows:
 - 5-hour usage window for the active account: used %, reset time, time until
   reset, and pace vs. a linear budget (`slow down` / `on pace` / `use more`),
   in bright blue/pace colors
-- 7-day usage window, labeled `7d(all)`: same, but pooled across every
+- 5-hour usage window, labeled `5h(all)`: same, but pooled across every
   account `cswap` knows about rather than just the active one — mean used %,
-  mean expected %, reset shown as the soonest of the accounts' reset dates
+  mean expected %, reset shown as the soonest of the accounts' reset dates.
+  (Weekly usage isn't shown here — check it with `cswap list`, which prints
+  its own combined 7d row.)
 
 Fields are packed onto as few lines as fit the terminal width (Claude Code
 sets `$COLUMNS` before running the script) — a field that doesn't fit wraps
@@ -24,13 +26,13 @@ Positive means under budget (bright green, "use more"), negative means over
 budget (bright red, "slow down"), within ±4 points of zero is "on pace"
 (bright yellow).
 
-The 5h segment only renders once Claude Code's status line payload includes
-`rate_limits.five_hour` — that's only populated for Claude.ai subscription
-accounts, and only after at least one API response in the session. The
-7d(all) segment instead comes from `cswap.exe list --json`, so it renders
-whenever `cswap` has at least one account with 7-day usage data, independent
-of the current session's rate-limit payload. Without either, the line just
-shows directory / branch / model / context.
+The first 5h segment only renders once Claude Code's status line payload
+includes `rate_limits.five_hour` — that's only populated for Claude.ai
+subscription accounts, and only after at least one API response in the
+session. The 5h(all) segment instead comes from `cswap.exe list --json`, so
+it renders whenever `cswap` has at least one account with 5-hour usage data,
+independent of the current session's rate-limit payload. Without either, the
+line just shows directory / branch / model / context.
 
 ## Requirements
 
@@ -38,7 +40,7 @@ shows directory / branch / model / context.
 - `node` on PATH (used for JSON parsing instead of `jq`, which isn't
   installed by default on Windows)
 - `git` on PATH (for the branch segment)
-- `cswap.exe` on PATH (for the combined 7d(all) segment) — the 7d(all)
+- `cswap.exe` on PATH (for the combined 5h(all) segment) — the 5h(all)
   segment just renders blank if it's missing or errors
 
 ## Setup
