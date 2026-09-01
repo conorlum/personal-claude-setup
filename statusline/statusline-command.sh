@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Claude Code status line
-# Line 1: directory | git branch | model | context usage
-# Line 2/3: 5h and 7d usage windows, with pace vs. a linear budget
+# Fields: directory | git branch | model | context usage | account email |
+# 5h usage window | 7d usage window (each with pace vs. a linear budget).
+# Fields are packed onto as few lines as fit $COLUMNS, wrapping to a new
+# line instead of running off the side.
 
 input=$(cat)
 
@@ -43,7 +45,7 @@ process.stdin.on("end", () => {
     const elapsed = Math.min(Math.max(now - windowStart, 0), windowSec);
     const expectedPct = (elapsed / windowSec) * 100;
     const pace = expectedPct - usedPct; // + = under budget, - = over budget
-    const verdict = Math.abs(pace) < 2 ? "on pace" : pace > 0 ? "use more" : "slow down";
+    const verdict = Math.abs(pace) < 4 ? "on pace" : pace > 0 ? "use more" : "slow down";
     const paceStr = (pace >= 0 ? "+" : "") + pace.toFixed(1);
     return [
       usedPct.toFixed(0),
@@ -84,56 +86,107 @@ if [ -n "$used_ctx" ]; then
   ctx_str=$(printf 'Context %.0f%%' "$used_ctx")
 fi
 
+account_email=$(node -e '
+try {
+  const j = JSON.parse(require("fs").readFileSync(process.env.HOME + "/.claude.json", "utf8"));
+  process.stdout.write((j.oauthAccount && j.oauthAccount.emailAddress) || "");
+} catch (e) {}
+' 2>/dev/null)
+
 CYAN='\033[36m'
 GREEN='\033[32m'
 MAGENTA='\033[35m'
 YELLOW='\033[33m'
-BLUE='\033[34m'
+BLUE='\033[94m'
 GRAY='\033[90m'
 RED='\033[31m'
+PINK='\033[38;2;255;105;180m'
 RESET='\033[0m'
 
 verdict_color() {
   case "$1" in
-    "slow down") echo "$RED" ;;
-    "use more") echo "$GREEN" ;;
-    *) echo "$YELLOW" ;;
+    "slow down") echo '\033[91m' ;;
+    "use more") echo '\033[92m' ;;
+    *) echo '\033[93m' ;;
   esac
 }
-
-# --- line 1 ---
-line1="$(printf '%b%s%b' "$CYAN" "$dir_display" "$RESET")"
-
-if [ -n "$branch" ]; then
-  line1="$line1 $(printf '%b|%b' "$GRAY" "$RESET") $(printf '%b(%s)%b' "$GREEN" "$branch" "$RESET")"
-fi
-
-line1="$line1 $(printf '%b|%b' "$GRAY" "$RESET") $(printf '%b%s%b' "$MAGENTA" "$model" "$RESET")"
-
-if [ -n "$ctx_str" ]; then
-  line1="$line1 $(printf '%b|%b' "$GRAY" "$RESET") $(printf '%b%s%b' "$YELLOW" "$ctx_str" "$RESET")"
-fi
-
-# --- usage windows, appended to the same line ---
-out="$line1"
 
 fmt_window() {
   local label="$1" used="$2" reset="$3" in="$4" pace="$5" verdict="$6"
   local pcolor
   pcolor=$(verdict_color "$verdict")
-  printf '%b%s:%b %s%%  resets %s  in %s  pace: %b%s%%%b (%s)' \
-    "$BLUE" "$label" "$RESET" \
-    "$used" "$reset" "$in" \
-    "$pcolor" "$pace" "$RESET" \
-    "$verdict"
+  printf '%b%s: %s%%  resets %s  in %s%b  pace: %b%s%% (%s)%b' \
+    "$BLUE" "$label" "$used" "$reset" "$in" "$RESET" \
+    "$pcolor" "$pace" "$verdict" "$RESET"
 }
 
-if [ -n "$five_used" ]; then
-  out="$out $(printf '%b|%b' "$GRAY" "$RESET") $(fmt_window "5h" "$five_used" "$five_reset" "$five_in" "$five_pace" "$five_verdict")"
-fi
+# --- build one "atom" per logical field, then pack atoms onto lines that fit
+# the terminal width (Claude Code sets COLUMNS before running this script),
+# wrapping to a new row instead of letting a line run off the side. ---
 
-if [ -n "$week_used" ]; then
-  out="$out $(printf '%b|%b' "$GRAY" "$RESET") $(fmt_window "7d" "$week_used" "$week_reset" "$week_in" "$week_pace" "$week_verdict")"
-fi
+strip_ansi() {
+  printf '%s' "$1" | sed -E $'s/\x1b\\[[0-9;]*m//g'
+}
 
-printf '%s\n' "$out"
+visible_len() {
+  local s
+  s=$(strip_ansi "$1")
+  printf '%s' "${#s}"
+}
+
+dir_atom="$(printf '%b%s%b' "$CYAN" "$dir_display" "$RESET")"
+model_atom="$(printf '%b%s%b' "$MAGENTA" "$model" "$RESET")"
+
+branch_atom=""
+[ -n "$branch" ] && branch_atom="$(printf '%b(%s)%b' "$GREEN" "$branch" "$RESET")"
+
+ctx_atom=""
+[ -n "$ctx_str" ] && ctx_atom="$(printf '%b%s%b' "$YELLOW" "$ctx_str" "$RESET")"
+
+account_atom=""
+[ -n "$account_email" ] && account_atom="$(printf '%b%s%b' "$PINK" "$account_email" "$RESET")"
+
+five_atom=""
+[ -n "$five_used" ] && five_atom="$(fmt_window "5h" "$five_used" "$five_reset" "$five_in" "$five_pace" "$five_verdict")"
+
+week_atom=""
+[ -n "$week_used" ] && week_atom="$(fmt_window "7d" "$week_used" "$week_reset" "$week_in" "$week_pace" "$week_verdict")"
+
+pipe_sep="$(printf '%b|%b' "$GRAY" "$RESET")"
+cols="${COLUMNS:-80}"
+
+lines=()
+current=""
+current_len=0
+
+add_atom() {
+  local atom="$1" alen needed
+  [ -z "$atom" ] && return
+  alen=$(visible_len "$atom")
+  if [ -z "$current" ]; then
+    current="$atom"
+    current_len="$alen"
+    return
+  fi
+  needed=$((current_len + 3 + alen))
+  if [ "$needed" -le "$cols" ]; then
+    current="$current $pipe_sep $atom"
+    current_len="$needed"
+  else
+    lines+=("$current")
+    current="$atom"
+    current_len="$alen"
+  fi
+}
+
+add_atom "$dir_atom"
+add_atom "$branch_atom"
+add_atom "$model_atom"
+add_atom "$ctx_atom"
+add_atom "$account_atom"
+add_atom "$five_atom"
+add_atom "$week_atom"
+
+[ -n "$current" ] && lines+=("$current")
+
+printf '%s\n' "${lines[@]}"
