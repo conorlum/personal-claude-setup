@@ -4,14 +4,16 @@ Custom Claude Code status line. Shows:
 
 - current directory
 - git branch (if inside a repo)
-- model name
+- model name and effort level (e.g. `Sonnet 5 high`)
 - context window usage
 - account email (from `~/.claude.json`'s `oauthAccount.emailAddress`), in
   pink — useful for telling two Claude accounts apart at a glance
-- 5-hour usage window: used %, reset time, time until reset, and pace vs. a
-  linear budget (`slow down` / `on pace` / `use more`), in bright blue/pace
-  colors
-- 7-day usage window: same, with reset shown as a date + time
+- 5-hour usage window for the active account: used %, reset time, time until
+  reset, and pace vs. a linear budget (`slow down` / `on pace` / `use more`),
+  in bright blue/pace colors
+- 7-day usage window, labeled `7d(all)`: same, but pooled across every
+  account `cswap` knows about rather than just the active one — mean used %,
+  mean expected %, reset shown as the soonest of the accounts' reset dates
 
 Fields are packed onto as few lines as fit the terminal width (Claude Code
 sets `$COLUMNS` before running the script) — a field that doesn't fit wraps
@@ -22,11 +24,13 @@ Positive means under budget (bright green, "use more"), negative means over
 budget (bright red, "slow down"), within ±4 points of zero is "on pace"
 (bright yellow).
 
-The 5h/7d segments only render once Claude Code's status line payload
-includes `rate_limits.five_hour` / `rate_limits.seven_day` — that's only
-populated for Claude.ai subscription accounts, and only after at least one
-API response in the session. Without it, the line just shows directory /
-branch / model / context.
+The 5h segment only renders once Claude Code's status line payload includes
+`rate_limits.five_hour` — that's only populated for Claude.ai subscription
+accounts, and only after at least one API response in the session. The
+7d(all) segment instead comes from `cswap.exe list --json`, so it renders
+whenever `cswap` has at least one account with 7-day usage data, independent
+of the current session's rate-limit payload. Without either, the line just
+shows directory / branch / model / context.
 
 ## Requirements
 
@@ -34,6 +38,8 @@ branch / model / context.
 - `node` on PATH (used for JSON parsing instead of `jq`, which isn't
   installed by default on Windows)
 - `git` on PATH (for the branch segment)
+- `cswap.exe` on PATH (for the combined 7d(all) segment) — the 7d(all)
+  segment just renders blank if it's missing or errors
 
 ## Setup
 
