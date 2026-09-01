@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
 # Claude Code status line
-# Fields: directory | git branch | model | context usage | account email |
-# 5h usage window | 7d usage window (each with pace vs. a linear budget).
+# Fields: directory | git branch | model + effort level | context usage |
+# account email | 5h usage window for the active account | 7d usage window
+# combined across every account cswap knows about (each with pace vs. a
+# linear budget).
 # Fields are packed onto as few lines as fit $COLUMNS, wrapping to a new
 # line instead of running off the side.
 
 input=$(cat)
 
-fields=$(printf '%s' "$input" | node -e '
+# Combined 7d figures across all cswap-managed accounts, not just the active
+# one — cswap.exe list --json gives every account's own usage/reset data.
+# Fed in via env var (not piped) since stdin is already used for $input.
+cswap_json=$(cswap.exe list --json 2>/dev/null)
+
+fields=$(printf '%s' "$input" | CSWAP_JSON="$cswap_json" node -e '
 let raw = "";
 process.stdin.on("data", d => raw += d);
 process.stdin.on("end", () => {
@@ -37,6 +44,13 @@ process.stdin.on("end", () => {
     return `${month} ${dt.getDate()} ${fmtClock(ts)}`;
   }
 
+  function paceFields(usedPct, expectedPct) {
+    const pace = expectedPct - usedPct; // + = under budget, - = over budget
+    const verdict = Math.abs(pace) < 4 ? "on pace" : pace > 0 ? "use more" : "slow down";
+    const paceStr = (pace >= 0 ? "+" : "") + pace.toFixed(1);
+    return [paceStr, verdict];
+  }
+
   function window(usedPct, resetsAt, windowSec, resetFmt) {
     if (usedPct === "" || resetsAt === "") return ["", "", "", "", ""];
     usedPct = Number(usedPct);
@@ -44,33 +58,63 @@ process.stdin.on("end", () => {
     const windowStart = resetsAt - windowSec;
     const elapsed = Math.min(Math.max(now - windowStart, 0), windowSec);
     const expectedPct = (elapsed / windowSec) * 100;
-    const pace = expectedPct - usedPct; // + = under budget, - = over budget
-    const verdict = Math.abs(pace) < 4 ? "on pace" : pace > 0 ? "use more" : "slow down";
-    const paceStr = (pace >= 0 ? "+" : "") + pace.toFixed(1);
     return [
       usedPct.toFixed(0),
       resetFmt(resetsAt),
       fmtDuration(resetsAt - now),
-      paceStr,
-      verdict,
+      ...paceFields(usedPct, expectedPct),
+    ];
+  }
+
+  // Same "average usage, soonest reset" pooling as the cswap PowerShell
+  // wrapper: accounts hold equal-sized quotas, so the mean of their used%
+  // is the spent share of the combined pool, and the mean of their
+  // elapsed-window% is what that share should be by now.
+  function combinedWeek() {
+    let accounts = [];
+    try { accounts = JSON.parse(process.env.CSWAP_JSON || "").accounts || []; } catch (e) { return ["", "", "", "", ""]; }
+    const parts = [];
+    for (const acc of accounts) {
+      const usage = g(acc, "usage.sevenDay", null);
+      if (!usage || usage.resetsAt === undefined || usage.pct === undefined) continue;
+      const resetsAt = Date.parse(usage.resetsAt) / 1000;
+      if (Number.isNaN(resetsAt)) continue;
+      const windowSec = 7 * 86400;
+      const elapsed = Math.min(Math.max(now - (resetsAt - windowSec), 0), windowSec);
+      parts.push({ pct: Number(usage.pct), expectedPct: (elapsed / windowSec) * 100, resetsAt });
+    }
+    if (parts.length === 0) return ["", "", "", "", ""];
+    const usedPct = parts.reduce((s, p) => s + p.pct, 0) / parts.length;
+    const expectedPct = parts.reduce((s, p) => s + p.expectedPct, 0) / parts.length;
+    const soonest = parts.reduce((a, p) => (p.resetsAt < a.resetsAt ? p : a));
+    return [
+      usedPct.toFixed(0),
+      fmtDate(soonest.resetsAt),
+      fmtDuration(soonest.resetsAt - now),
+      ...paceFields(usedPct, expectedPct),
     ];
   }
 
   const five = window(g(j, "rate_limits.five_hour.used_percentage", ""), g(j, "rate_limits.five_hour.resets_at", ""), 5 * 3600, fmtClock);
-  const week = window(g(j, "rate_limits.seven_day.used_percentage", ""), g(j, "rate_limits.seven_day.resets_at", ""), 7 * 86400, fmtDate);
+  const week = combinedWeek();
 
   const out = [
     g(j, "workspace.current_dir"),
     g(j, "model.display_name"),
+    g(j, "effort.level"),
     g(j, "context_window.used_percentage"),
     ...five,
     ...week,
   ];
-  process.stdout.write(out.join("\t"));
+  // Unit separator, not tab: bash `read` treats tab as IFS *whitespace* and
+  // collapses runs of it even with IFS restricted to just "\t", which drops
+  // any lone empty field (e.g. no effort.level) and shifts every field
+  // after it. Non-whitespace IFS chars like this one do not collapse.
+  process.stdout.write(out.join("\x1f"));
 });
 ')
 
-IFS=$'\t' read -r dir model used_ctx \
+IFS=$'\x1f' read -r dir model effort used_ctx \
   five_used five_reset five_in five_pace five_verdict \
   week_used week_reset week_in week_pace week_verdict <<< "$fields"
 
@@ -135,7 +179,9 @@ visible_len() {
 }
 
 dir_atom="$(printf '%b%s%b' "$CYAN" "$dir_display" "$RESET")"
-model_atom="$(printf '%b%s%b' "$MAGENTA" "$model" "$RESET")"
+model_str="$model"
+[ -n "$effort" ] && model_str="$model_str $effort"
+model_atom="$(printf '%b%s%b' "$MAGENTA" "$model_str" "$RESET")"
 
 branch_atom=""
 [ -n "$branch" ] && branch_atom="$(printf '%b(%s)%b' "$GREEN" "$branch" "$RESET")"
@@ -150,7 +196,7 @@ five_atom=""
 [ -n "$five_used" ] && five_atom="$(fmt_window "5h" "$five_used" "$five_reset" "$five_in" "$five_pace" "$five_verdict")"
 
 week_atom=""
-[ -n "$week_used" ] && week_atom="$(fmt_window "7d" "$week_used" "$week_reset" "$week_in" "$week_pace" "$week_verdict")"
+[ -n "$week_used" ] && week_atom="$(fmt_window "7d(all)" "$week_used" "$week_reset" "$week_in" "$week_pace" "$week_verdict")"
 
 pipe_sep="$(printf '%b|%b' "$GRAY" "$RESET")"
 cols="${COLUMNS:-80}"
