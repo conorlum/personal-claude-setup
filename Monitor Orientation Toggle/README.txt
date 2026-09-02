@@ -20,10 +20,10 @@ One-time setup on her PC
    Get the .zip, extract "MultiMonitorTool.exe", and place it directly in
    this same folder, next to the .ps1 and .bat files.
 
-2. Find the correct monitor identifier for this specific PC. Numbering can
-   differ from what Windows Settings shows. Right-click
-   "Toggle-SecondMonitorOrientation.ps1" -> Run with PowerShell is NOT what
-   you want for this step; instead open PowerShell in this folder and run:
+2. The script auto-detects the second monitor by picking whichever connected
+   display has the LOWEST resolution (by pixel count) - no device name needed
+   in the normal case. To confirm it picks the right one (and to check the
+   real portrait orientation value), open PowerShell in this folder and run:
 
        powershell -ExecutionPolicy Bypass -File ".\Toggle-SecondMonitorOrientation.ps1" -ListMonitors
 
@@ -34,18 +34,18 @@ One-time setup on her PC
    ".\Toggle-SecondMonitorOrientation.ps1 -ListMonitors".)
 
    A popup will list every detected display with its device name (e.g.
-   "\\.\DISPLAY2"), current orientation in degrees, and whether it's the
-   primary display. Note the device name of the physical second monitor and
-   its current orientation.
+   "\\.\DISPLAY2"), current orientation in degrees, whether it's the primary
+   display, and its pixel count. Note the device name and current orientation
+   of the physical second monitor (the lower pixel-count one).
 
-3. Open "Toggle-SecondMonitorOrientation.ps1" in Notepad and edit the three
-   values near the top:
+3. Open "Toggle-SecondMonitorOrientation.ps1" in Notepad and edit:
 
-       $TargetDisplay         the device name from step 2, e.g. \\.\DISPLAY2
        $PortraitOrientation   her monitor's normal orientation: 90 or 270
        $LandscapeOrientation  usually 0 (leave as-is unless it looks wrong)
 
-   Save the file.
+   Save the file. Leave $TargetDisplay blank unless both monitors share the
+   same resolution (auto-detect can't tell them apart) - in that case, set it
+   to the device name from step 2, e.g. \\.\DISPLAY2.
 
 4. Test it: run the .bat file once by double-clicking
    "Toggle Second Monitor Orientation.bat". The second monitor should flip
@@ -82,6 +82,9 @@ Troubleshooting
 - "The target monitor was not found" - the monitor is disconnected/asleep,
   or $TargetDisplay no longer matches. Re-run with -ListMonitors and update
   the config value.
+- "Multiple monitors share the lowest resolution" - auto-detect can't tell
+  the monitors apart because they're the same resolution. Set $TargetDisplay
+  manually to the device name from -ListMonitors.
 - Nothing visibly changes - re-check $PortraitOrientation and
   $LandscapeOrientation match what -ListMonitors reported for that monitor's
   two real states.
