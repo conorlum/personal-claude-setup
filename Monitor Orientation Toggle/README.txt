@@ -65,6 +65,40 @@ One-time setup on her PC
 
 That's it - the desktop shortcut is the button amima clicks.
 
+Optional: global keyboard shortcut (e.g. Ctrl+Alt+=)
+-------------------------------------------------------
+Makes the toggle run from anywhere with a key combo, no need to see the
+desktop or click anything. Uses Ctrl+Alt+= as the example here since it's
+unlikely to already be claimed by Windows or another app - pick any letter
+or symbol key that isn't already in use.
+
+1. The shortcut MUST live on the Desktop (or in a Start Menu folder) for
+   Windows to honor its hotkey - it silently does nothing anywhere else
+   (e.g. left inside this project folder). If you made the desktop shortcut
+   in step 5 above, it's already in the right place.
+
+2. Right-click the desktop shortcut -> Properties -> Shortcut tab -> click
+   into the "Shortcut key" field -> press "=". Windows fills in
+   "Ctrl + Alt + =" (it always forces Ctrl+Alt as the base combo; hold Shift
+   too while pressing the key if you want Ctrl+Alt+Shift+<key> instead, e.g.
+   to dodge a conflict). Click Apply, then OK.
+
+3. IMPORTANT: on the same Properties dialog, check the "Advanced..." button
+   (Shortcut tab) and make sure "Run as administrator" is UNCHECKED. If it's
+   checked, every run triggers a "Do you want to allow this app to make
+   changes to your device?" UAC prompt - the toggle doesn't need admin
+   rights, so this should stay off.
+
+4. Test: click on empty desktop space (so nothing else has focus), then
+   press Ctrl+Alt+=. The monitor should flip with no popups. If a "Windows
+   protected your PC" or "Open File - Security Warning" popup appears
+   instead, MultiMonitorTool.exe (or another file in this folder) still has
+   Windows' "downloaded from the internet" flag on it - run this once in
+   PowerShell to clear it (only affects this one file, not any system-wide
+   setting):
+
+       Unblock-File -Path ".\MultiMonitorTool.exe"
+
 Dry run / checking without changing anything
 ----------------------------------------------
    powershell -ExecutionPolicy Bypass -File ".\Toggle-SecondMonitorOrientation.ps1" -DryRun
@@ -90,6 +124,19 @@ Troubleshooting
   two real states.
 - A console window flashes briefly - normal, this is PowerShell starting up;
   it closes itself and does not stay open.
+- The keyboard shortcut does nothing - the shortcut file isn't on the
+  Desktop/Start Menu (Windows only honors hotkeys from there), or another
+  app already grabbed that combo (try a different key). Full-screen games
+  can also swallow the combo before Windows sees it - test on the desktop
+  first, outside any game.
+- "Do you want to allow this app to make changes to your device?" (UAC) on
+  every run - the shortcut's "Run as administrator" got checked. Properties
+  -> Advanced... -> uncheck it.
+- "Windows protected your PC" / "Open File - Security Warning" popup on
+  every run - a file in this folder still has the internet "Mark of the
+  Web" flag from being downloaded. Run
+  Unblock-File -Path ".\MultiMonitorTool.exe" once (per-file fix, no
+  system-wide setting changes).
 
 Do not use
 ------------
